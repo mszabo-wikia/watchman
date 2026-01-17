@@ -13,7 +13,6 @@
 #include "watchman/Clock.h"
 #include "watchman/CookieSync.h"
 #include "watchman/PerfSample.h"
-#include "watchman/telemetry/LogEvent.h"
 #include "watchman/watchman_string.h"
 
 namespace watchman {

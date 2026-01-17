@@ -53,51 +53,7 @@ enable_testing()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/external/install/include")
-
-option(ENABLE_EDEN_SUPPORT "If enabled, add support for the Eden \
-  virtual filesystem.  That requires fbthrift."
-  ON)
-
-# Determine whether we are the git repo produced by shipit, a staging
-# area produced by shipit in the FB internal CI, or whether
-# we are building in the source monorepo.
-# For the FB internal CI flavor running shipit, CMAKE_CURRENT_SOURCE_DIR
-# will have a value like "..../shipit_projects/watchman".
-if (IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.git" OR
-    "${CMAKE_CURRENT_SOURCE_DIR}" MATCHES "shipit_projects")
-  set(IS_SHIPPED_IT TRUE)
-else()
-  set(IS_SHIPPED_IT FALSE)
-endif()
-
-# If we're building from inside the monorepo, make the local directory
-# look like the shipit-transformed source in the git repo.
-# On windows we do a dumb recursive copy of the files because we cannot
-# guarantee that we'll be successful in setting up a symlink.
-# On everything else we set up a simple symlink.
-# In theory we can tell cmake to add a non-child subdir and avoid the
-# copy/symlink thing, but we'd need to teach various targets how to resolve
-# the path and that is rather a lot of work (I spent a couple of hours on this
-# before throwing in the towel).
-function(maybe_shipit_dir MONOREPO_RELATIVE_PATH)
-  get_filename_component(base "${MONOREPO_RELATIVE_PATH}" NAME)
-  if (NOT IS_SHIPPED_IT AND
-      NOT IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${base})
-    if (WIN32)
-      file(COPY
-        "${CMAKE_CURRENT_SOURCE_DIR}/${MONOREPO_RELATIVE_PATH}"
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR})
-    else()
-      execute_process(COMMAND
-        ln -s ${MONOREPO_RELATIVE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/${base})
-    endif()
-  endif()
-endfunction()
-
-if (ENABLE_EDEN_SUPPORT)
-  # We use shipit to mirror in these locations from the monorepo
-  maybe_shipit_dir("../eden")
-endif()
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/edencommon)
 
 # A nonsensical version that doesn't correspond to any manually
 # released version.
@@ -365,18 +321,9 @@ find_package(
 find_package(LibEvent REQUIRED)
 get_filename_component(LIBEVENT_LIBDIR "${LIBEVENT_LIB}" DIRECTORY)
 link_directories(${LIBEVENT_LIBDIR})
-find_package(edencommon CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(folly CONFIG REQUIRED)
 
-if (ENABLE_EDEN_SUPPORT)
-  find_package(fizz CONFIG REQUIRED)
-  find_package(wangle CONFIG REQUIRED)
-  find_package(FBThrift CONFIG REQUIRED)
-  find_package(fb303 CONFIG REQUIRED)
-  find_package(cpptoml CONFIG REQUIRED)
-  include_directories(${FB303_INCLUDE_DIR})
-endif()
 if(DEFINED ENV{NODE_BIN})
   set(NODE $ENV{NODE_BIN})
 else()
@@ -475,16 +422,22 @@ else()
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_COMMON} -O3")
 endif()
 
+# For edencommon
+set(INCLUDE_INSTALL_DIR include)
+set(LIB_INSTALL_DIR lib)
+add_subdirectory(edencommon/eden/common/testharness)
+add_subdirectory(edencommon/eden/common/utils)
+set(INCLUDE_INSTALL_DIR)
+set(LIB_INSTALL_DIR)
+
 add_library(third_party_deps INTERFACE)
 target_link_libraries(third_party_deps INTERFACE
   Folly::folly
   glog::glog
   gflags
   ${Boost_LIBRARIES}
-  fb303::fb303
   fmt::fmt
-  edencommon::edencommon_utils
-  edencommon::edencommon_telemetry
+  edencommon_utils
 )
 target_include_directories(third_party_deps INTERFACE
   ${FOLLY_INCLUDE_DIR}
@@ -492,15 +445,7 @@ target_include_directories(third_party_deps INTERFACE
   ${GFLAGS_INCLUDE_DIR}
   ${Boost_INCLUDE_DIRS}
 )
-if (ENABLE_EDEN_SUPPORT)
-  target_link_libraries(
-    third_party_deps
-    INTERFACE
-    ${YARPL_LIBRARIES}
-    FBThrift::thriftcpp2
-    cpptoml
-  )
-endif()
+
 if(PCRE2_FOUND)
   target_link_libraries(third_party_deps INTERFACE ${PCRE2_LIBRARY})
   target_include_directories(third_party_deps INTERFACE ${PCRE2_INCLUDE_DIR})
@@ -579,31 +524,6 @@ watchman/root/file.cpp
 
 add_library(testsupport STATIC ${testsupport_sources})
 target_link_libraries(testsupport log string jansson third_party_deps)
-
-if (ENABLE_EDEN_SUPPORT)
-  add_fbthrift_cpp_library(
-    eden_config_thrift
-    eden/fs/config/eden_config.thrift
-  )
-  add_fbthrift_cpp_library(
-    eden_service_thrift
-    eden/fs/service/eden.thrift
-    SERVICES
-      EdenService
-    DEPENDS
-      eden_config_thrift
-      fb303::fb303_thrift_cpp
-  )
-  add_fbthrift_cpp_library(
-    streamingeden_thrift
-    eden/fs/service/streamingeden.thrift
-    SERVICES
-      StreamingEdenService
-    DEPENDS
-      eden_service_thrift
-      fb303::fb303_thrift_cpp
-  )
-endif()
 
 list(APPEND watchman_sources
 watchman/ChildProcess.cpp
@@ -711,9 +631,6 @@ watchman/saved_state/SavedStateInterface.cpp
 watchman/scm/Git.cpp
 watchman/scm/Mercurial.cpp
 watchman/scm/SCM.cpp
-watchman/telemetry/LogEvent.cpp
-watchman/telemetry/WatchmanStats.cpp
-watchman/telemetry/WatchmanStructuredLogger.cpp
 watchman/thirdparty/getopt/GetOpt.cpp
 watchman/watcher/Watcher.cpp
 watchman/watcher/WatcherRegistry.cpp
@@ -724,11 +641,6 @@ watchman/watcher/portfs.cpp
 watchman/watcher/kqueue_and_fsevents.cpp
 watchman/watcher/win32.cpp
 )
-
-if (ENABLE_EDEN_SUPPORT)
-  # We currently only support talking to eden on posix systems
-  list(APPEND watchman_sources watchman/watcher/eden.cpp)
-endif()
 
 add_executable(watchman ${watchman_sources})
 set_target_properties(watchman PROPERTIES
@@ -751,13 +663,6 @@ if (WIN32)
     libdeelevate
   )
   install_rust_executable(deelevate)
-endif()
-
-if (ENABLE_EDEN_SUPPORT)
-  target_link_libraries(
-    watchman
-    streamingeden_thrift
-  )
 endif()
 
 install(TARGETS watchman RUNTIME DESTINATION bin)

@@ -4,5 +4,5 @@ name = libaio
 [debs]
 libaio-dev
 
-[rpms.distro=centos_stream]
+[rpms]
 libaio-devel

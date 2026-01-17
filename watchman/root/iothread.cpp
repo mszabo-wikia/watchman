@@ -14,8 +14,6 @@
 #include "watchman/fs/ParallelWalk.h"
 #include "watchman/root/Root.h"
 #include "watchman/root/warnerr.h"
-#include "watchman/telemetry/LogEvent.h"
-#include "watchman/telemetry/WatchmanStructuredLogger.h"
 #include "watchman/watcher/Watcher.h"
 #include "watchman/watchman_dir.h"
 #include "watchman/watchman_file.h"
@@ -88,13 +86,6 @@ void InMemoryView::fullCrawl(
   sample.finish();
   sample.force_log();
   sample.log();
-
-  FullCrawl fullCrawl;
-  fullCrawl.root = root_metadata.root_path.string();
-  fullCrawl.recrawl = root_metadata.recrawl_count;
-  fullCrawl.case_sensitive = root_metadata.case_sensitive;
-  fullCrawl.watcher = root_metadata.watcher.string();
-  getLogger()->logEvent(fullCrawl);
 
   logf(ERR, "{}crawl complete\n", recrawlCount ? "re" : "");
 }

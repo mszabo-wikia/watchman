@@ -1,0 +1,3 @@
+[submodule "edencommon"]
+	path = edencommon
+	url = https://github.com/facebookexperimental/edencommon.git

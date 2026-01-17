@@ -89,11 +89,6 @@ resolveRootByName(Client* client, const char* rootName, bool create) {
       root = w_root_resolve(rootName, create);
     }
 
-    if (client->dispatch_command) {
-      addRootMetadataToEvent(
-          root->getRootMetadata(), *client->dispatch_command);
-    }
-
     if (client->perf_sample) {
       client->perf_sample->add_root_metadata(root->getRootMetadata());
     }

@@ -24,8 +24,6 @@
 #include "watchman/root/Root.h"
 #include "watchman/saved_state/SavedStateInterface.h"
 #include "watchman/scm/SCM.h"
-#include "watchman/telemetry/LogEvent.h"
-#include "watchman/telemetry/WatchmanStructuredLogger.h"
 
 using namespace watchman;
 
@@ -162,7 +160,6 @@ static void default_generators(
 
 static void execute_common(
     QueryContext* ctx,
-    QueryExecute* queryExecute,
     PerfSample* sample,
     QueryResult* res,
     QueryGenerator generator,
@@ -220,10 +217,6 @@ static void execute_common(
       }
     }
 
-    // NOTE: sample and queryExecute are either both non-null or both null
-    queryExecute->num_special_files = ctx->namesToLog.size();
-    queryExecute->special_files = json_array(nameList).toString();
-
     sample->add_meta(
         "num_special_files_in_result_set",
         json_integer(ctx->namesToLog.size()));
@@ -233,7 +226,6 @@ static void execute_common(
   }
 
   if (sample) {
-    // NOTE: sample and queryExecute are either both non-null or both null
     auto root_metadata = ctx->root->getRootMetadata();
 
     if (sample->finish()) {
@@ -249,52 +241,6 @@ static void execute_common(
       }
       sample->add_meta("query_execute", std::move(meta));
       sample->log();
-    }
-
-    const auto& [samplingRate, eventCount] =
-        getLogEventCounters(LogEventType::QueryExecuteType);
-    // Log if override set, or if we have hit the sample rate,
-    // or if the query used the changes_since_mergebase_with generator
-    if (sample->will_log || eventCount == samplingRate ||
-        (!ctx->generatorType.empty() &&
-         ctx->generatorType == "scm_files_changed_since_mergebase_with") ||
-        (!ctx->freshInstanceCause.empty() &&
-         ctx->freshInstanceCause != "New instance")) {
-      addRootMetadataToEvent(root_metadata, *queryExecute);
-      queryExecute->event_count = eventCount != samplingRate ? 0 : eventCount;
-      queryExecute->fresh_instance = res->isFreshInstance;
-      queryExecute->deduped = ctx->num_deduped;
-      queryExecute->results = ctx->resultsArray.size();
-      queryExecute->walked = ctx->getNumWalked();
-      queryExecute->eden_glob_files_duration_us =
-          ctx->edenGlobFilesDurationUs.load(std::memory_order_relaxed);
-      queryExecute->eden_changed_files_duration_us =
-          ctx->edenChangedFilesDurationUs.load(std::memory_order_relaxed);
-      queryExecute->eden_file_properties_duration_us =
-          ctx->edenFilePropertiesDurationUs.load(std::memory_order_relaxed);
-      queryExecute->scm_files_changed_since_mergebase_with_duration_us =
-          ctx->scmFilesChangedSinceMergebaseWithDurationUs.load(
-              std::memory_order_relaxed);
-      queryExecute->generation_duration_ms =
-          ctx->generationDuration.load().count();
-      if (!ctx->generatorType.empty()) {
-        queryExecute->generator = ctx->generatorType;
-      }
-
-      if (ctx->query->query_spec) {
-        queryExecute->query = ctx->query->query_spec->toString();
-      }
-      queryExecute->client_pid = clientInfo.clientPid;
-      queryExecute->client_name = clientInfo.clientInfo.has_value()
-          ? facebook::eden::ProcessInfoCache::cleanProcessCommandline(
-                std::move(clientInfo.clientInfo.value().get().name))
-          : "";
-
-      if (!ctx->freshInstanceCause.empty()) {
-        queryExecute->fresh_instance_cause = ctx->freshInstanceCause;
-      }
-
-      getLogger()->logEvent(*queryExecute);
     }
   }
 
@@ -315,11 +261,9 @@ QueryResult w_query_execute(
   bool disableFreshInstance{false};
   auto requestId = query->request_id;
 
-  QueryExecute queryExecute;
   PerfSample sample("query_execute");
   if (requestId && !requestId->empty()) {
     log(DBG, "request_id = ", *requestId, "\n");
-    queryExecute.request_id = requestId->string();
     sample.add_meta("request_id", w_string_to_json(*requestId));
   }
 
@@ -381,7 +325,6 @@ QueryResult w_query_execute(
           // available. The changed files list will be relative to the prior
           // clock as if scm-aware queries were not being used at all, to ensure
           // clients have all changed files they need.
-          queryExecute.saved_state_missing = true;
           resultClock.savedStateCommitId = w_string();
           modifiedMergebase = std::nullopt;
         }
@@ -527,12 +470,12 @@ QueryResult w_query_execute(
       QueryResult r;
       c.clockAtStartOfQuery = ctx.clockAtStartOfQuery;
       c.since = ctx.since;
-      execute_common(&c, nullptr, nullptr, &r, generator, query->clientInfo);
+      execute_common(&c, nullptr, &r, generator, query->clientInfo);
     }
   }
 
   execute_common(
-      &ctx, &queryExecute, &sample, &res, generator, query->clientInfo);
+      &ctx, &sample, &res, generator, query->clientInfo);
   return res;
 }
 
