@@ -255,8 +255,11 @@ class CachedProject(object):
         self.loader = loader
         self.cache = cache
 
+        version = 'v1'
+
         self.cache_key = "-".join(
             (
+                version,
                 m.name,
                 self.ctx.get("os"),
                 self.ctx.get("distro") or "none",
