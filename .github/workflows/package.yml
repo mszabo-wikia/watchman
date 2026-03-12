@@ -57,4 +57,6 @@ jobs:
         run: ./autogen.sh
 
       - name: Make .deb
+        env:
+          UBUNTU_VERSION: '24.04'
         run: ./watchman/build/package/make-deb.sh
